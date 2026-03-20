@@ -1,0 +1,19 @@
+# Ignore all .env files in any directory
+.env
+.env.*
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Ignore specific secret files you mentioned earlier
+/etc/secrets/ca.pem
+secrets/*.pem
+*.crt
+*.key
+
+# Standard Node.js ignores
+node_modules/
+dist/
+build/
+.DS_Store
