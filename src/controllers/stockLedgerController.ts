@@ -1,7 +1,6 @@
 import { Response } from "express";
 import { asyncHandler } from "../middlewares/asyncHandler.js";
 import { AuthRequest } from "../middlewares/authMiddleware.js";
-import { createInternalClient } from "../utils/http.js";
 import stockLedgerService from "../services/stockLedgerService.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { ApiError } from "../utils/ApiError.js";
