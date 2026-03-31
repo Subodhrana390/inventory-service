@@ -82,6 +82,11 @@ const stockLedgerSchema = new Schema<IStockLedger>(
   },
 );
 
+stockLedgerSchema.index({ shopId: 1, createdAt: -1, id: -1 });
+stockLedgerSchema.index({ inventoryId: 1, createdAt: -1 });
+stockLedgerSchema.index({ orderId: 1 });
+stockLedgerSchema.index({ entryType: 1 });
+
 export const StockLedgerModel = mongoose.model<IStockLedger>(
   "StockLedger",
   stockLedgerSchema,

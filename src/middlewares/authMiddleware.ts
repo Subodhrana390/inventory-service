@@ -1,75 +1,50 @@
 import { Request, Response, NextFunction } from "express";
 import jwt from "jsonwebtoken";
-import { createInternalClient } from "../utils/http.js";
 import { config } from "../config/index.js";
+import { ApiError } from "../utils/ApiError.js";
 
-const shopClient = createInternalClient(config.services.shop);
+export const protect = (
+  req: Request,
+  _: Response,
+  next: NextFunction,
+): void => {
+  const header = req.headers.authorization;
 
-const JWT_SECRET = config.jwt.secret;
+  if (!header || !header.startsWith("Bearer ")) {
+    return next(new ApiError(401, "No token provided"));
+  }
 
-export interface AuthRequest extends Request {
-    user?: {
-        id: string;
-        role: string;
-        [key: string]: any;
+  const token = header.split(" ")[1];
+
+  try {
+    const decoded = jwt.verify(token, config.jwt.secret) as {
+      id: string;
+      role: string;
     };
-}
 
-export const protect = (req: AuthRequest, res: Response, next: NextFunction) => {
-    const header = req.headers.authorization;
-    if (!header || !header.startsWith("Bearer ")) {
-        const error = new Error("No token provided") as any;
-        error.statusCode = 401;
-        throw error;
-    }
+    req.user = decoded;
 
-    const token = header.split(" ")[1];
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET) as any;
-        req.user = decoded;
-        next();
-    } catch (err: any) {
-        err.statusCode = 401;
-        throw err;
-    }
-};
-
-export const requireShopOwner = (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (!req.user || req.user.role !== "shop-owner") {
-        const error = new Error("Access denied. Shop owner privileges required.") as any;
-        error.statusCode = 403;
-        throw error;
-    }
     next();
+  } catch (error) {
+    return next(new ApiError(401, "Invalid or expired token"));
+  }
 };
 
-export const requireShopOwnership = async (req: AuthRequest, res: Response, next: NextFunction) => {
-    const shopId = req.params.shopId || req.body.shopId || req.query.shopId;
-
-    if (!shopId) {
-        const error = new Error("Shop ID is required") as any;
-        error.statusCode = 400;
-        return next(error);
-    }
-
+export const authorizeRoles =
+  (...allowedRoles: string[]) =>
+  (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
-        const error = new Error("Unauthorized") as any;
-        error.statusCode = 401;
-        return next(error);
+      return next(new ApiError(401, "Unauthorized"));
     }
 
-    try {
-        const { data } = await shopClient.get(`/api/v1/internal/shops/verify-owner/${req.user.id}/${shopId}`);
-        if (!data.isOwner) {
-            const error = new Error("Unauthorized: You do not own this shop") as any;
-            error.statusCode = 403;
-            return next(error);
-        }
-        next();
-    } catch (err: any) {
-        console.error("Error verifying shop ownership:", err.message);
-        const error = new Error("Service unavailable") as any;
-        error.statusCode = 503;
-        return next(error);
+    if (!allowedRoles.includes(req.user.role)) {
+      return next(
+        new ApiError(
+          403,
+          `Access denied. Allowed roles: ${allowedRoles.join(", ")}`,
+        ),
+      );
     }
-};
+
+    next();
+  };

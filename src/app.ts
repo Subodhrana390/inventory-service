@@ -15,7 +15,7 @@ app.use(morgan("dev"));
 app.use(express.json());
 
 app.get("/health", (req: Request, res: Response) => {
-    res.json({ service: "inventory-service", status: "healthy" });
+  res.json({ service: "inventory-service", status: "healthy" });
 });
 
 app.use("/api/v1/inventory", publicRoutes);

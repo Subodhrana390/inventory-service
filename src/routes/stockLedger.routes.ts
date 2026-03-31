@@ -3,26 +3,13 @@ import { Router } from "express";
 import { protect } from "../middlewares/authMiddleware.js";
 
 const router = Router();
+router.use(protect);
 
 router.get(
   "/inventory/:inventoryId",
-  stockLedgerController.getLedgerByInventory,
+  stockLedgerController.getLedgerByInventoryId,
 );
 
-router.get("/shop/:shopId", stockLedgerController.getLedgerByShop);
-
-router.get("/order/:orderId", protect, stockLedgerController.getLedgerByOrder);
-
-router.get(
-  "/reference/:referenceId",
-  protect,
-  stockLedgerController.getLedgerByReference,
-);
-
-router.get(
-  "/inventory/:inventoryId/summary",
-  protect,
-  stockLedgerController.getMovementSummary,
-);
+router.get("/stock-history/:shopId", stockLedgerController.getStockHistory);
 
 export default router;
