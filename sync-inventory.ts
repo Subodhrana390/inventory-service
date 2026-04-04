@@ -1,6 +1,4 @@
 import mongoose from "mongoose";
-import dotenv from "dotenv";
-import path from "path";
 import axios from "axios";
 import { config } from "./src/config/index.js";
 import Inventory from "./src/models/inventory.schema.js";

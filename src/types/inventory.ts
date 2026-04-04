@@ -25,7 +25,6 @@ export enum ConsumptionUnit {
 export enum LedgerEntryType {
   INWARD = "INWARD",
   ORDER_ACCEPTED = "ACCEPTED",
-  ORDER_SHIPPED = "SHIPPED",
   ORDER_DELIVERED = "DELIVERED",
   ORDER_CANCELLED = "CANCELLED",
   ADJUSTMENT = "ADJUSTMENT",
@@ -101,7 +100,10 @@ export interface IInventory {
 export interface IInventoryModel extends Model<IInventory> {
   // Alerts
   findLowStockItems(shopId: string): Promise<(IInventory & Document)[]>;
-  findExpiredItems(shopId: string): Promise<(IInventory & Document)[]>;
+  findExpiringItems(
+    shopId: string,
+    days: number,
+  ): Promise<(IInventory & Document)[]>;
 
   // Core ops
   findByProductAndBatch(
@@ -144,10 +146,10 @@ export interface IStockLedger {
 
   entryType: LedgerEntryType;
 
-  changeInPacks: number; // ✅ source of truth
-  changeInBaseUnits?: number; // optional / informational
+  changeInPacks: number;
+  changeInBaseUnits?: number;
 
-  balanceAfterPacks: number; // ✅ authoritative balance
+  balanceAfterPacks: number;
 
   reason?: string;
   performedBy: string;

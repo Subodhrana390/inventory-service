@@ -14,6 +14,8 @@ interface SearchParams {
   offset?: number;
 }
 
+console.log(config.services.product, config.services.shop);
+
 class InventoryService {
   private static instance: InventoryService;
   private productClient = createInternalClient(config.services.product);
@@ -44,11 +46,11 @@ class InventoryService {
         const [productRes, shopRes] = await Promise.all([
           inventory.productCategory === "MEDICINE"
             ? this.productClient.get(
-                `/api/v1/internal/products/medical-catalog/${inventory.productId}`,
-              )
+              `/api/v1/internal/products/medical-catalog/${inventory.productId}`,
+            )
             : this.productClient.get(
-                `/api/v1/internal/products/shop-products/${inventory.productId}`,
-              ),
+              `/api/v1/internal/products/shop-products/${inventory.productId}`,
+            ),
           this.shopClient.get(
             `/api/v1/internal/shops/details/${inventory.shopId}`,
           ),
@@ -114,51 +116,6 @@ class InventoryService {
     };
   }
 
-  async updateInventory(
-    inventoryId: string,
-    updates: Partial<IInventory>,
-    performedBy: string,
-  ) {
-    const inventory = await Inventory.findOne({ id: inventoryId });
-    if (!inventory) throw new ApiError(404, "Inventory not found");
-
-    delete (updates as any).stock;
-
-    Object.assign(inventory, updates);
-    inventory.updatedBy = performedBy;
-    inventory.lastStockUpdate = new Date();
-
-    return inventory.save();
-  }
-
-  async deleteInventory(inventoryId: string) {
-    const inventory = await Inventory.findOne({ id: inventoryId });
-    if (!inventory) throw new ApiError(404, "Inventory not found");
-
-    if (inventory.stock.totalBaseUnits > 0) {
-      throw new ApiError(400, "Cannot delete inventory with existing stock");
-    }
-
-    const result = await Inventory.findOneAndDelete({ id: inventoryId });
-
-    // Remove linked product except medicine
-    if (inventory.productCategory !== "MEDICINE") {
-      try {
-        await this.productClient.delete(
-          `/api/v1/products/shop-products/${inventory.productId}`,
-        );
-        console.log(`🗑️ Linked shop product ${inventory.productId} deleted`);
-      } catch (error: any) {
-        console.error(
-          `❌ Failed to delete linked product ${inventory.productId}:`,
-          error.message,
-        );
-      }
-    }
-
-    return result;
-  }
-
   async adjustStock(
     inventoryId: string,
     packs: number,
@@ -168,35 +125,66 @@ class InventoryService {
     referenceId?: string,
   ) {
     const inventory = await Inventory.findOne({ id: inventoryId });
-    if (!inventory) throw new ApiError(404, "Inventory not found");
 
-    const units = packs * inventory.packaging.unitsPerPack;
+    if (!inventory) {
+      throw new ApiError(404, "Inventory not found");
+    }
 
-    // Determine direction of change based on type
-    const multiplier = [
-      LedgerEntryType.INWARD,
-      LedgerEntryType.MANUAL_ADDITION,
-    ].includes(type)
-      ? 1
-      : -1;
+    if (!packs || packs <= 0) {
+      throw new ApiError(400, "packs must be greater than 0");
+    }
 
-    inventory.stock.totalBaseUnits += units * multiplier;
+    const unitsPerPack = inventory.packaging.unitsPerPack;
+    const units = packs * unitsPerPack;
 
-    if (inventory.stock.totalBaseUnits < 0) {
+    const previousUnits = inventory.stock.totalBaseUnits;
+
+    let updatedUnits = previousUnits;
+    let changeInUnits = 0;
+    let changeInPacks = 0;
+    switch (type) {
+      case LedgerEntryType.INWARD:
+      case LedgerEntryType.MANUAL_ADDITION:
+        updatedUnits += units;
+        changeInUnits = units;
+        changeInPacks = packs;
+        break;
+
+      case LedgerEntryType.DAMAGE:
+      case LedgerEntryType.EXPIRY_REMOVAL:
+      case LedgerEntryType.RETURN_TO_SUPPLIER:
+        updatedUnits -= units;
+        changeInUnits = -units;
+        changeInPacks = -packs;
+        break;
+
+      case LedgerEntryType.AUDIT_ADJUSTMENT:
+        updatedUnits = units;
+        changeInUnits = updatedUnits - previousUnits;
+        changeInPacks = Math.round(changeInUnits / unitsPerPack);
+        break;
+
+      default:
+        throw new ApiError(400, "Unsupported adjustment type");
+    }
+
+    if (updatedUnits < 0) {
       throw new ApiError(400, "Insufficient stock for adjustment");
     }
 
+    inventory.stock.totalBaseUnits = updatedUnits;
     inventory.lastStockUpdate = new Date();
+
     await inventory.save();
 
     await stockLedgerService.createEntry({
       inventoryId,
       shopId: inventory.shopId,
       entryType: type,
-      changeInPacks: packs * multiplier,
+      changeInPacks,
       balanceAfterPacks: inventory.availablePacks ?? 0,
       performedBy,
-      reason: reason || `Manual stock adjustment: ${type}`,
+      reason: reason ?? `Stock adjustment: ${type}`,
       referenceId,
     });
 
@@ -216,20 +204,49 @@ class InventoryService {
       );
       product = data.data ?? null;
     }
+
     return {
       ...inventoryItem.toObject(),
       product,
     };
   }
 
-  async populateInventoryWithProducts(inventoryItems: any) {
+  async populateInventoryWithProducts(
+    inventoryItems: any[],
+    options?: {
+      limit?: number;
+      nextCursor?: string | null;
+      prevCursor?: string | null;
+    }
+  ) {
+    const limit = options?.limit ?? 20;
+    const nextCursor = options?.nextCursor ?? null;
+    const prevCursor = options?.prevCursor ?? null;
+
     const isArray = Array.isArray(inventoryItems);
     const items = isArray ? inventoryItems : [inventoryItems];
 
+    // cursor slicing logic
+    let startIndex = 0;
+
+    if (nextCursor) {
+      startIndex = items.findIndex(i => i.id === nextCursor) + 1;
+    }
+
+    if (prevCursor) {
+      startIndex = Math.max(
+        items.findIndex(i => i.id === prevCursor) - limit,
+        0
+      );
+    }
+
+    const paginatedItems = items.slice(startIndex, startIndex + limit);
+
+    // collect product ids
     const medicineIds = new Set<string>();
     const shopProductIds = new Set<string>();
 
-    for (const item of items) {
+    for (const item of paginatedItems) {
       if (!item?.productId) continue;
 
       if (item.productCategory === "MEDICINE") {
@@ -242,16 +259,16 @@ class InventoryService {
     const [medicinesRes, productsRes] = await Promise.all([
       medicineIds.size
         ? this.productClient.post(
-            `/api/v1/internal/products/medical-catalog/bulk`,
-            { ids: [...medicineIds] },
-          )
+          `/api/v1/internal/products/medical-catalog/bulk`,
+          { ids: [...medicineIds] }
+        )
         : Promise.resolve({ data: { data: [] } }),
 
       shopProductIds.size
         ? this.productClient.post(
-            `/api/v1/internal/products/shop-products/bulk`,
-            { ids: [...shopProductIds] },
-          )
+          `/api/v1/internal/products/shop-products/bulk`,
+          { ids: [...shopProductIds] }
+        )
         : Promise.resolve({ data: { data: [] } }),
     ]);
 
@@ -261,8 +278,10 @@ class InventoryService {
     const medicineMap = new Map(medicines.map((m: any) => [m.id, m]));
     const productMap = new Map(products.map((p: any) => [p.id, p]));
 
-    const populated = items.map((item: any) => {
-      const obj = typeof item.toObject === "function" ? item.toObject() : item;
+    const populated = paginatedItems.map((item: any) => {
+      const obj =
+        typeof item.toObject === "function" ? item.toObject() : item;
+
       obj.product =
         obj.productCategory === "MEDICINE"
           ? medicineMap.get(obj.productId) || null
@@ -271,7 +290,18 @@ class InventoryService {
       return obj;
     });
 
-    return isArray ? populated : populated[0];
+    const lastItem = populated[populated.length - 1];
+    const firstItem = populated[0];
+
+    return {
+      items: isArray ? populated : populated[0],
+
+      hasNextPage: startIndex + limit < items.length,
+      hasPrevPage: startIndex > 0,
+
+      nextCursor: lastItem?.id ?? null,
+      prevCursor: firstItem?.id ?? null,
+    };
   }
 
   async searchInventories({
@@ -346,26 +376,6 @@ class InventoryService {
     return {
       data: await this.populateInventoryWithProducts(items),
       hasMore,
-    };
-  }
-
-  async getInventoryStats(shopId: string) {
-    const inventory = await Inventory.find({ shopId });
-
-    const lowStock = await (Inventory as any).findLowStockItems(shopId);
-    const expiring = await (Inventory as any).findExpiringItems(shopId, 30);
-
-    return {
-      totalItems: inventory.length,
-      totalValue: inventory.reduce(
-        (acc, i) =>
-          acc + (i.availablePacks ?? 0) * (i.pricing?.costPricePerPack ?? 0),
-        0,
-      ),
-      lowStockItems: lowStock.length,
-      outOfStockItems: inventory.filter((i) => (i.availablePacks ?? 0) === 0)
-        .length,
-      expiringItems: expiring.length,
     };
   }
 
@@ -662,31 +672,11 @@ class InventoryService {
   }
 
   async getExpiryReport(shopId: string, days = 30) {
-    return (Inventory as any).findExpiringItems(shopId, days);
+    return Inventory.findExpiringItems(shopId, days);
   }
 
   async getLowStockReport(shopId: string) {
-    return (Inventory as any).findLowStockItems(shopId);
-  }
-
-  async getInventoryValuation(shopId: string) {
-    const inventory = await Inventory.find({ shopId });
-
-    return inventory.reduce(
-      (acc, i) => {
-        const packs = i.availablePacks ?? 0;
-        acc.totalCostValue += packs * i.pricing.costPricePerPack;
-        acc.totalSaleValue += packs * i.pricing.salePricePerPack;
-        acc.totalMrpValue += packs * i.pricing.mrpPerPack;
-        return acc;
-      },
-      {
-        totalCostValue: 0,
-        totalSaleValue: 0,
-        totalMrpValue: 0,
-        currency: "INR",
-      },
-    );
+    return Inventory.findLowStockItems(shopId);
   }
 }
 

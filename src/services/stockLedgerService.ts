@@ -1,4 +1,6 @@
-import StockLedger from "../models/stock-ledger.schema.js";
+import StockLedger, {
+  StockLedgerModel,
+} from "../models/stock-ledger.schema.js";
 import { LedgerEntryType } from "../types/inventory.js";
 
 class StockLedgerService {
@@ -35,57 +37,117 @@ class StockLedgerService {
     });
   }
 
-  async getByInventory(inventoryId: string, limit = 50, offset = 0) {
-    return StockLedger.find({ inventoryId })
-      .sort({ createdAt: -1 })
-      .skip(offset)
-      .limit(limit);
-  }
-
-  async getByShop(shopId: string, limit = 50, offset = 0) {
-    return StockLedger.find({ shopId })
-      .sort({ createdAt: -1 })
-      .skip(offset)
-      .limit(limit);
-  }
-
-  async getByOrder(orderId: string) {
-    return StockLedger.find({ orderId }).sort({ createdAt: -1 });
-  }
-
-  async getByReference(referenceId: string) {
-    return StockLedger.find({ referenceId }).sort({ createdAt: -1 });
-  }
-
-  async getMovementSummary(
+  async getByInventory(
     inventoryId: string,
-    fromDate?: Date,
-    toDate?: Date,
+    limit: number,
+    cursor?: string,
+    direction: "next" | "prev" = "next",
   ) {
     const query: any = { inventoryId };
 
-    if (fromDate || toDate) {
-      query.createdAt = {};
-      if (fromDate) query.createdAt.$gte = fromDate;
-      if (toDate) query.createdAt.$lte = toDate;
+    if (cursor) {
+      query.createdAt =
+        direction === "next"
+          ? { $lt: new Date(cursor) }
+          : { $gt: new Date(cursor) };
     }
 
-    const entries = await StockLedger.find(query);
+    const sortOrder = direction === "next" ? -1 : 1;
 
-    return entries.reduce(
-      (acc, entry) => {
-        acc.totalInward += entry.changeInPacks > 0 ? entry.changeInPacks : 0;
-        acc.totalOutward +=
-          entry.changeInPacks < 0 ? Math.abs(entry.changeInPacks) : 0;
-        acc.netChange += entry.changeInPacks;
-        return acc;
-      },
-      {
-        totalInward: 0,
-        totalOutward: 0,
-        netChange: 0,
-      },
-    );
+    const ledger = await StockLedgerModel.find(query)
+      .sort({ createdAt: sortOrder })
+      .limit(limit);
+
+    return direction === "prev" ? ledger.reverse() : ledger;
+  }
+
+  async getStockHistory(
+    shopId: string,
+    fromDate?: Date,
+    toDate?: Date,
+    limit = 10,
+    cursor?: string,
+    direction: "next" | "prev" = "next",
+  ) {
+    const match: any = { shopId };
+
+    const andConditions: any[] = [];
+
+    if (fromDate || toDate) {
+      const dateFilter: any = {};
+
+      if (fromDate) dateFilter.$gte = fromDate;
+      if (toDate) dateFilter.$lte = toDate;
+
+      if (Object.keys(dateFilter).length > 0) {
+        andConditions.push({ createdAt: dateFilter });
+      }
+    }
+
+    if (cursor) {
+      const cursorObj = JSON.parse(
+        Buffer.from(cursor, "base64").toString("utf8"),
+      );
+
+      const cursorDate = new Date(cursorObj.createdAt);
+
+      const cursorCondition =
+        direction === "next"
+          ? {
+              $or: [
+                { createdAt: { $lt: cursorDate } },
+                {
+                  createdAt: cursorDate,
+                  id: { $lt: cursorObj.id },
+                },
+              ],
+            }
+          : {
+              $or: [
+                { createdAt: { $gt: cursorDate } },
+                {
+                  createdAt: cursorDate,
+                  id: { $gt: cursorObj.id },
+                },
+              ],
+            };
+
+      andConditions.push(cursorCondition);
+    }
+
+    if (andConditions.length > 0) {
+      match.$and = andConditions;
+    }
+
+    const sortOrder = direction === "next" ? -1 : 1;
+
+    const docs = await StockLedger.find(match)
+      .sort({ createdAt: sortOrder, id: sortOrder })
+      .limit(limit + 1)
+      .lean();
+
+    const hasMore = docs.length > limit;
+
+    if (hasMore) docs.pop();
+
+    const history = direction === "prev" ? docs.reverse() : docs;
+
+    const encodeCursor = (doc: any) =>
+      Buffer.from(
+        JSON.stringify({
+          createdAt: doc.createdAt,
+          id: doc.id,
+        }),
+      ).toString("base64");
+
+    return {
+      items: history,
+      hasNextPage: direction === "next" ? hasMore : Boolean(cursor),
+      hasPrevPage: direction === "prev" ? hasMore : Boolean(cursor),
+      nextCursor:
+        history.length > 0 ? encodeCursor(history[history.length - 1]) : null,
+      prevCursor: history.length > 0 ? encodeCursor(history[0]) : null,
+    };
   }
 
   async getLastEntry(inventoryId: string) {

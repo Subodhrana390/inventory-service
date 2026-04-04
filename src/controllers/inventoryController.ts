@@ -1,23 +1,20 @@
 import { Request, Response } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { asyncHandler } from "../middlewares/asyncHandler.js";
-import { AuthRequest } from "../middlewares/authMiddleware.js";
 import inventoryService from "../services/inventoryService.js";
 import { ApiError } from "../utils/ApiError.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import { createInternalClient } from "../utils/http.js";
 import { config } from "../config/index.js";
+import { LedgerEntryType } from "../types/inventory.js";
+import InventoryModel from "../models/inventory.schema.js";
 
 class InventoryController {
   private shopClient = createInternalClient(
     config.services.shop || "http://localhost:3004",
   );
 
-  /* =======================
-     CREATE INVENTORY
-  ======================= */
-
-  addInventoryItem = asyncHandler(async (req: AuthRequest, res: Response) => {
+  addInventoryItem = asyncHandler(async (req: Request, res: Response) => {
     const inventory = await inventoryService.createInventory({
       ...req.body,
       createdBy: req.user?.id || uuidv4(),
@@ -30,10 +27,6 @@ class InventoryController {
         new ApiResponse(201, inventory, "Inventory item created successfully"),
       );
   });
-
-  /* =======================
-     GET SHOP INVENTORY
-  ======================= */
 
   getShopInventory = asyncHandler(async (req: Request, res: Response) => {
     const shopId = req.params.shopId as string;
@@ -53,15 +46,11 @@ class InventoryController {
     res.json(
       new ApiResponse(
         200,
-        { items: populated, pagination },
+        populated,
         "Shop inventory fetched successfully",
       ),
     );
   });
-
-  /* =======================
-     GET SINGLE INVENTORY
-  ======================= */
 
   getInventoryItem = asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
@@ -71,22 +60,102 @@ class InventoryController {
       throw new ApiError(404, "Inventory not found");
     }
 
-    const populated = await inventoryService.populateInventoryWithProduct(id);
+    const populated =
+      await inventoryService.populateInventoryWithProduct(inventory);
 
     res.json(
       new ApiResponse(200, populated, "Inventory item fetched successfully"),
     );
   });
 
-  updateStock = asyncHandler(async (req: AuthRequest, res: Response) => {
-    const id = req.params.id as string;
-    const { type, packs, orderId, referenceId } = req.body;
+  updateInventoryItem = asyncHandler(async (req: Request, res: Response) => {
+    const { id } = req.params;
+    const {
+      pricing,
+      alerts,
+    } = req.body as {
+      pricing?: {
+        costPricePerPack?: number;
+        mrpPerPack?: number;
+        salePricePerPack?: number;
+        gstPercent?: number;
+        discountPercentage?: number;
+      };
+      alerts?: {
+        lowStockThreshold?: number;
+        expiryAlertDays?: number;
+      };
+    };
 
     if (!req.user) {
       throw new ApiError(401, "Unauthorized");
     }
 
+    const updatePayload: any = {
+      updatedBy: req.user.id,
+      lastStockUpdate: new Date(),
+    };
+
+    if (pricing) {
+      if (pricing.costPricePerPack !== undefined)
+        updatePayload["pricing.costPricePerPack"] = pricing.costPricePerPack;
+      if (pricing.mrpPerPack !== undefined)
+        updatePayload["pricing.mrpPerPack"] = pricing.mrpPerPack;
+      if (pricing.salePricePerPack !== undefined)
+        updatePayload["pricing.salePricePerPack"] = pricing.salePricePerPack;
+      if (pricing.gstPercent !== undefined)
+        updatePayload["pricing.gstPercent"] = pricing.gstPercent;
+      if (pricing.discountPercentage !== undefined)
+        updatePayload["pricing.discountPercentage"] = pricing.discountPercentage;
+    }
+
+    if (alerts) {
+      if (alerts.lowStockThreshold !== undefined)
+        updatePayload["alerts.lowStockThreshold"] = alerts.lowStockThreshold;
+      if (alerts.expiryAlertDays !== undefined)
+        updatePayload["alerts.expiryAlertDays"] = alerts.expiryAlertDays;
+    }
+
+    const updatedItem = await InventoryModel.findOneAndUpdate(
+      { id },
+      { $set: updatePayload },
+      { new: true, runValidators: true },
+    );
+
+    if (!updatedItem) {
+      res
+        .status(404)
+        .json(new ApiResponse(404, null, "Inventory item not found"));
+      return;
+    }
+
+    res.json(
+      new ApiResponse(
+        200,
+        updatedItem,
+        "Inventory details updated successfully",
+      ),
+    );
+  });
+
+  updateStock = asyncHandler(async (req: Request, res: Response) => {
+    const id = req.params.id as string;
+    const { stockAdjustmentType, packs } = req.body;
+
+    if (!req.user) {
+      throw new ApiError(401, "Unauthorized");
+    }
+
+    if (!stockAdjustmentType || !packs) {
+      throw new ApiError(400, "StockAdjustmentType and packs are required");
+    }
+
+    if (!Object.values(LedgerEntryType).includes(stockAdjustmentType)) {
+      throw new ApiError(400, "Invalid stock adjustment type");
+    }
+
     const inventory = await inventoryService.getInventoryById(id);
+
     if (!inventory) {
       throw new ApiError(404, "Inventory not found");
     }
@@ -94,120 +163,47 @@ class InventoryController {
     const { data } = await this.shopClient.get(
       `/api/v1/internal/shops/verify-owner/${req.user.id}/${inventory.shopId}`,
     );
-    const isOwner = data.isOwner;
 
-    if (!isOwner) {
+    if (!data?.isOwner) {
       throw new ApiError(403, "Unauthorized: You do not own this shop");
     }
 
-    switch (type) {
-      case "inward":
-        await inventoryService.addInwardStock(
-          inventory.id,
-          packs,
-          req.user.id,
-          referenceId,
-        );
+    let reason = "";
+
+    switch (stockAdjustmentType) {
+      case LedgerEntryType.DAMAGE:
+        reason = `${packs} packs of ${inventory.productId} were damaged`;
         break;
 
-      case "reserve":
-        await inventoryService.reserveStock(
-          inventory.id,
-          packs,
-          req.user.id,
-          orderId,
-        );
+      case LedgerEntryType.AUDIT_ADJUSTMENT:
+        reason = `${packs} packs of ${inventory.productId} were adjusted`;
         break;
 
-      case "release":
-        await inventoryService.releaseReservedStock(
-          inventory.id,
-          packs,
-          req.user.id,
-          orderId,
-        );
-        break;
-
-      case "deduct":
-        await inventoryService.deductStock(
-          inventory.id,
-          packs,
-          req.user.id,
-          orderId,
-        );
-        break;
-
-      case "damage":
-      case "expiry_removal":
-      case "audit_adjustment":
-      case "return_to_supplier":
-      case "manual_addition":
-        await inventoryService.adjustStock(
-          inventory.id,
-          packs,
-          req.user.id,
-          type.toUpperCase() as any,
-          req.body.reason,
-          referenceId,
-        );
+      case LedgerEntryType.MANUAL_ADDITION:
+        reason = `${packs} packs of ${inventory.productId} were added`;
         break;
 
       default:
-        throw new ApiError(400, "Invalid stock operation type");
+        throw new ApiError(400, "Unsupported adjustment type");
     }
 
-    const updatedInventory = await inventoryService.getInventoryById(id);
+    const updatedInventory = await inventoryService.adjustStock(
+      inventory.id,
+      packs,
+      req.user.id,
+      stockAdjustmentType,
+      reason,
+    );
 
-    res.json(
+    return res.json(
       new ApiResponse(200, updatedInventory, "Stock updated successfully"),
     );
   });
-
-  /* =======================
-     INVENTORY ALERTS
-  ======================= */
-
-  getInventoryAlerts = asyncHandler(async (req: Request, res: Response) => {
-    const shopId = req.params.shopId as string;
-    const lowStock = await (inventoryService as any).findLowStockItems(shopId);
-    const expiring = await (inventoryService as any).findExpiringItems(
-      shopId,
-      30,
-    );
-
-    res.json(
-      new ApiResponse(
-        200,
-        { lowStock, expiring },
-        "Inventory alerts fetched successfully",
-      ),
-    );
-  });
-
-  /* =======================
-     SEARCH INVENTORY
-  ======================= */
 
   searchInventory = asyncHandler(async (req: Request, res: Response) => {
     const result = await inventoryService.searchInventories(req.body);
     res.json(new ApiResponse(200, result, "Inventory search successful"));
   });
-
-  /* =======================
-     INVENTORY STATS
-  ======================= */
-
-  getInventoryStats = asyncHandler(async (req: Request, res: Response) => {
-    const shopId = req.params.shopId as string;
-    const stats = await inventoryService.getInventoryStats(shopId);
-    res.json(
-      new ApiResponse(200, stats, "Inventory stats fetched successfully"),
-    );
-  });
-
-  /* =======================
-     GET INVENTORY BY PRODUCT
-  ======================= */
 
   getSingleInventoryItem = asyncHandler(async (req: Request, res: Response) => {
     const { shopId, productId } = req.body;
@@ -282,11 +278,7 @@ class InventoryController {
     );
   });
 
-  /* =======================
-     MANAGEMENT OPERATIONS
-  ======================= */
-
-  auditStock = asyncHandler(async (req: AuthRequest, res: Response) => {
+  auditStock = asyncHandler(async (req: Request, res: Response) => {
     const id = req.params.id as string;
     const { physicalPacks } = req.body;
 
@@ -313,35 +305,61 @@ class InventoryController {
     );
   });
 
-  getExpiryReport = asyncHandler(async (req: Request, res: Response) => {
-    const { shopId } = req.params;
+  getInventoryReport = asyncHandler(async (req: Request, res: Response) => {
+    const { shopId } = req.params as { shopId: string };
     const { days = "30" } = req.query;
+    const daysNum = Number(days);
 
-    const items = await inventoryService.getExpiryReport(
-      shopId as string,
-      parseInt(days as string),
-    );
-    res.json(new ApiResponse(200, items, "Expiry report fetched successfully"));
-  });
+    const [statsResult, lowStock, expiring] = await Promise.all([
+      InventoryModel.aggregate([
+        { $match: { shopId } },
+        {
+          $group: {
+            _id: null,
+            totalItems: { $sum: 1 },
+            totalValue: {
+              $sum: {
+                $multiply: [
+                  {
+                    $divide: [
+                      { $ifNull: ["$stock.totalBaseUnits", 0] },
+                      { $ifNull: ["$packaging.unitsPerPack", 1] },
+                    ],
+                  },
+                  { $ifNull: ["$pricing.costPricePerPack", 0] },
+                ],
+              },
+            },
+            outOfStockCount: {
+              $sum: { $cond: [{ $lte: ["$stock.totalBaseUnits", 0] }, 1, 0] },
+            },
+          },
+        },
+        { $project: { _id: 0 } },
+      ]),
+      inventoryService.getLowStockReport(shopId),
+      inventoryService.getExpiryReport(shopId, daysNum),
+    ]);
 
-  getLowStockReport = asyncHandler(async (req: Request, res: Response) => {
-    const { shopId } = req.params;
-    const items = await inventoryService.getLowStockReport(shopId as string);
-    res.json(
-      new ApiResponse(200, items, "Low stock report fetched successfully"),
-    );
-  });
+    const baseStats = statsResult[0] || {
+      totalItems: 0,
+      totalValue: 0,
+      outOfStockCount: 0,
+    };
 
-  getInventoryValuation = asyncHandler(async (req: Request, res: Response) => {
-    const { shopId } = req.params;
-    const valuation = await inventoryService.getInventoryValuation(
-      shopId as string,
-    );
     res.json(
       new ApiResponse(
         200,
-        valuation,
-        "Inventory valuation fetched successfully",
+        {
+          stats: {
+            ...baseStats,
+            lowStockCount: lowStock.length,
+            expiringCount: expiring.length,
+          },
+          lowStock,
+          expiring,
+        },
+        "Full inventory report generated successfully",
       ),
     );
   });
