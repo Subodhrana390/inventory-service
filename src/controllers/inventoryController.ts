@@ -75,9 +75,9 @@ class InventoryController {
       alerts,
     } = req.body as {
       pricing?: {
-        costPricePerPack?: number;
-        mrpPerPack?: number;
-        salePricePerPack?: number;
+        costPrice?: number;
+        mrp?: number;
+        sellingPrice?: number;
         gstPercent?: number;
         discountPercentage?: number;
       };
@@ -97,12 +97,12 @@ class InventoryController {
     };
 
     if (pricing) {
-      if (pricing.costPricePerPack !== undefined)
-        updatePayload["pricing.costPricePerPack"] = pricing.costPricePerPack;
-      if (pricing.mrpPerPack !== undefined)
-        updatePayload["pricing.mrpPerPack"] = pricing.mrpPerPack;
-      if (pricing.salePricePerPack !== undefined)
-        updatePayload["pricing.salePricePerPack"] = pricing.salePricePerPack;
+      if (pricing.costPrice !== undefined)
+        updatePayload["pricing.costPrice"] = pricing.costPrice;
+      if (pricing.mrp !== undefined)
+        updatePayload["pricing.mrp"] = pricing.mrp;
+      if (pricing.sellingPrice !== undefined)
+        updatePayload["pricing.sellingPrice"] = pricing.sellingPrice;
       if (pricing.gstPercent !== undefined)
         updatePayload["pricing.gstPercent"] = pricing.gstPercent;
       if (pricing.discountPercentage !== undefined)
@@ -270,7 +270,7 @@ class InventoryController {
     const prices = inventoryItems.map((item) => ({
       productId: item.productId,
       shopId: item.shopId,
-      price: item.pricing.salePricePerPack,
+      price: item.pricing.sellingPrice,
     }));
 
     res.json(
@@ -326,7 +326,7 @@ class InventoryController {
                       { $ifNull: ["$packaging.unitsPerPack", 1] },
                     ],
                   },
-                  { $ifNull: ["$pricing.costPricePerPack", 0] },
+                  { $ifNull: ["$pricing.costPrice", 0] },
                 ],
               },
             },

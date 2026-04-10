@@ -68,9 +68,9 @@ export interface IInventory {
   };
 
   pricing: {
-    costPricePerPack: number;
-    mrpPerPack: number;
-    salePricePerPack: number;
+    costPrice: number;
+    mrp: number;
+    sellingPrice: number;
     discountPercentage?: number;
     gstPercent?: number;
   };

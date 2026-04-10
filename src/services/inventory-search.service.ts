@@ -71,8 +71,8 @@ export class InventorySearchService {
           status: inventory.status || "active",
           location,
           pricing: {
-            mrp: inventory.pricing?.mrpPerPack,
-            sellingPrice: inventory.pricing?.salePricePerPack,
+            mrp: inventory.pricing?.mrp,
+            sellingPrice: inventory.pricing?.sellingPrice,
             discount: inventory.pricing?.discountPercentage,
           },
           stock: inventory.availablePacks,

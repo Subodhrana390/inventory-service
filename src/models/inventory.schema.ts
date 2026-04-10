@@ -81,17 +81,17 @@ const inventorySchema = new Schema<IInventory, IInventoryModel>(
     },
 
     pricing: {
-      costPricePerPack: {
+      costPrice: {
         type: Number,
         required: true,
         min: 0,
       },
-      mrpPerPack: {
+      mrp: {
         type: Number,
         required: true,
         min: 0,
       },
-      salePricePerPack: {
+      sellingPrice: {
         type: Number,
         required: true,
         min: 0,
