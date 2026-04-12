@@ -40,13 +40,12 @@ class InventoryController {
       cursor as string,
     );
 
-    const populated =
-      await inventoryService.populateInventoryWithProducts(items);
+    const result = await inventoryService.populateInventoryWithProducts(items);
 
     res.json(
       new ApiResponse(
         200,
-        populated,
+        result,
         "Shop inventory fetched successfully",
       ),
     );
