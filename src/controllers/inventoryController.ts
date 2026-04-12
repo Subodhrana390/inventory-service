@@ -131,7 +131,7 @@ class InventoryController {
     res.json(
       new ApiResponse(
         200,
-        updatedItem,
+        updatedItem.toJSON(),
         "Inventory details updated successfully",
       ),
     );
