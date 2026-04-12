@@ -243,7 +243,13 @@ class InventoryController {
       await inventoryService.getInventoryItemsByCart(cartItemsIds);
 
     if (!inventoryItems.length) {
-      throw new ApiError(404, "Inventory items not found");
+      return res.json(
+        new ApiResponse(
+          200,
+          { items: [], hasNextPage: false, hasPrevPage: false, nextCursor: null, prevCursor: null },
+          "No inventory items found"
+        )
+      );
     }
 
     const populated =
