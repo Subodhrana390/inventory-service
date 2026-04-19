@@ -8,11 +8,9 @@ export const handleProductEvent = async (event: any) => {
     switch (type) {
       case "product.updated":
         // payload is the updated product object (medicine or shop product)
-        await InventorySearchService.updateByQuery({
-          productId: payload.id,
-          productName: payload.name,
+        await InventorySearchService.syncProductUpdate(payload.id, {
+          name: payload.name,
           productImage: payload.image || payload.images?.[0], // handle both types
-          images: payload.images,
         });
         console.log(`✅ Synced product update for ${payload.id} to ES`);
         break;

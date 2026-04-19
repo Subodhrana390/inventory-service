@@ -6,12 +6,11 @@ export const handleShopEvent = async (event: any) => {
 
   try {
     switch (type) {
-      case "SHOP_UPDATED":
+      case "shop.updated":
         // payload is the updated shop object
-        await InventorySearchService.updateByQuery({
-          shopId: payload.id,
-          shopName: payload.name,
-          location: payload.location, // should be updated in ES
+        await InventorySearchService.syncShopUpdate(payload.id, {
+          name: payload.name,
+          location: payload.location, 
         });
         console.log(`✅ Synced shop update for ${payload.id} to ES`);
         break;

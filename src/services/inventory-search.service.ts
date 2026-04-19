@@ -94,7 +94,7 @@ export class InventorySearchService {
     }
   }
 
-  static async updateByQuery(script: string, query: any) {
+  static async updateByQuery(script: string, query: any, params: any = {}) {
     try {
       await esClient.updateByQuery({
         index: PRODUCT_INDEX,
@@ -102,6 +102,7 @@ export class InventorySearchService {
           script: {
             source: script,
             lang: "painless",
+            params,
           },
           query,
         },
@@ -110,6 +111,25 @@ export class InventorySearchService {
     } catch (error) {
       console.error("❌ OpenSearch update_by_query failed:", error);
     }
+  }
+
+  static async syncProductUpdate(productId: string, data: any) {
+    const script = `
+      if (params.name != null) ctx._source.name = params.name;
+      if (params.productImage != null) ctx._source.productImage = params.productImage;
+      if (params.productImage != null) ctx._source.primaryImage = params.productImage;
+    `;
+    const query = { term: { productId } };
+    await this.updateByQuery(script, query, data);
+  }
+
+  static async syncShopUpdate(shopId: string, data: any) {
+    const script = `
+      if (params.name != null) ctx._source.shopName = params.name;
+      if (params.location != null) ctx._source.location = params.location;
+    `;
+    const query = { term: { shopId } };
+    await this.updateByQuery(script, query, data);
   }
 
   static async deleteInventory(inventoryId: string) {
