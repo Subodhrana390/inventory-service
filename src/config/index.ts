@@ -28,7 +28,7 @@ export const config = {
   },
   kafka: {
     clientId: process.env.APP_INVENTORY_KAFKA_CLIENT_ID!,
-    brokers: process.env.APP_KAFKA_BROKER!,
+    brokers: (process.env.APP_KAFKA_BROKER || "localhost:9092").split(","),
     groupId:
       process.env.APP_INVENTORY_KAFKA_GROUP_ID! || "inventory-service-group",
     sasl: {

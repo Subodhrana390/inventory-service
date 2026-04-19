@@ -2,11 +2,11 @@ import { Kafka, SASLOptions, Producer, Consumer, Admin } from "kafkajs";
 import { config } from "../../config/index.js";
 
 
-const sasl: SASLOptions = {
+const sasl: any = config.kafka.sasl.username ? {
     mechanism: config.kafka.sasl.mechanism,
     username: config.kafka.sasl.username,
     password: config.kafka.sasl.password,
-};
+} : undefined;
 
 class KafkaClient {
     private kafka: Kafka;
@@ -17,7 +17,7 @@ class KafkaClient {
     constructor() {
         this.kafka = new Kafka({
             clientId: config.kafka.clientId,
-            brokers: [config.kafka.brokers],
+            brokers: config.kafka.brokers,
             retry: {
                 initialRetryTime: config.kafka.retryDelay,
                 retries: config.kafka.retries,
