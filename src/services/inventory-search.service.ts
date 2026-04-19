@@ -56,7 +56,8 @@ export class InventorySearchService {
   static async indexInventory(inventory: any, product: any, shop: any) {
     try {
       const coords = shop.address?.location?.coordinates;
-      const location = coords ? { lat: coords[0], lon: coords[1] } : undefined;
+      // Coordinates in MongoDB are [lon, lat]. ES GeoPoint expects {lat, lon}.
+      const location = coords ? { lat: coords[1], lon: coords[0] } : undefined;
 
       await esClient.index({
         index: PRODUCT_INDEX,
@@ -90,6 +91,24 @@ export class InventorySearchService {
         `❌ OpenSearch indexing failed for inventory ${inventory.id}:`,
         error
       );
+    }
+  }
+
+  static async updateByQuery(script: string, query: any) {
+    try {
+      await esClient.updateByQuery({
+        index: PRODUCT_INDEX,
+        body: {
+          script: {
+            source: script,
+            lang: "painless",
+          },
+          query,
+        },
+      });
+      console.log(`✅ OpenSearch docs updated by query`);
+    } catch (error) {
+      console.error("❌ OpenSearch update_by_query failed:", error);
     }
   }
 

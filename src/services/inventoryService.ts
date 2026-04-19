@@ -28,6 +28,30 @@ class InventoryService {
     return InventoryService.instance;
   }
 
+  private async syncToSearch(inventory: any) {
+    try {
+      const [productRes, shopRes] = await Promise.all([
+        inventory.productCategory === "MEDICINE"
+          ? this.productClient.get(
+            `/api/v1/internal/products/medical-catalog/${inventory.productId}`,
+          )
+          : this.productClient.get(
+            `/api/v1/internal/products/shop-products/${inventory.productId}`,
+          ),
+        this.shopClient.get(
+          `/api/v1/internal/shops/details/${inventory.shopId}`,
+        ),
+      ]);
+      const product = productRes.data.data;
+      const shop = shopRes.data.data;
+      if (product && shop) {
+        await InventorySearchService.indexInventory(inventory, product, shop);
+      }
+    } catch (err) {
+      console.error("❌ Failed to sync inventory to ES:", err);
+    }
+  }
+
   async createInventory(payload: Partial<IInventory>) {
     const existing = await Inventory.findOne({
       shopId: payload.shopId,
@@ -41,29 +65,8 @@ class InventoryService {
 
     const inventory = await Inventory.create(payload);
 
-    (async () => {
-      try {
-        const [productRes, shopRes] = await Promise.all([
-          inventory.productCategory === "MEDICINE"
-            ? this.productClient.get(
-              `/api/v1/internal/products/medical-catalog/${inventory.productId}`,
-            )
-            : this.productClient.get(
-              `/api/v1/internal/products/shop-products/${inventory.productId}`,
-            ),
-          this.shopClient.get(
-            `/api/v1/internal/shops/details/${inventory.shopId}`,
-          ),
-        ]);
-        const product = productRes.data.data;
-        const shop = shopRes.data.data;
-        if (product && shop) {
-          await InventorySearchService.indexInventory(inventory, product, shop);
-        }
-      } catch (err) {
-        console.error("❌ Failed to sync inventory to ES:", err);
-      }
-    })();
+    // Sync to ES
+    this.syncToSearch(inventory).catch(() => { });
 
     if ((inventory.availablePacks ?? 0) > 0) {
       await stockLedgerService.createEntry({
@@ -187,6 +190,8 @@ class InventoryService {
       reason: reason ?? `Stock adjustment: ${type}`,
       referenceId,
     });
+
+    this.syncToSearch(inventory).catch(() => { });
 
     return inventory;
   }
@@ -401,6 +406,7 @@ class InventoryService {
 
     inventory.lastStockUpdate = new Date();
     await inventory.save();
+    this.syncToSearch(inventory).catch(() => { });
 
     await stockLedgerService.createEntry({
       inventoryId,
@@ -430,6 +436,7 @@ class InventoryService {
 
     inventory.lastStockUpdate = new Date();
     await inventory.save();
+    this.syncToSearch(inventory).catch(() => { });
 
     await stockLedgerService.createEntry({
       inventoryId,
@@ -462,6 +469,7 @@ class InventoryService {
 
     inventory.lastStockUpdate = new Date();
     await inventory.save();
+    this.syncToSearch(inventory).catch(() => { });
 
     await stockLedgerService.createEntry({
       inventoryId,
@@ -488,6 +496,7 @@ class InventoryService {
 
     inventory.lastStockUpdate = new Date();
     await inventory.save();
+    this.syncToSearch(inventory).catch(() => { });
 
     await stockLedgerService.createEntry({
       inventoryId,
@@ -544,6 +553,8 @@ class InventoryService {
       inventory.lastStockUpdate = new Date();
       await inventory.save();
 
+      this.syncToSearch(inventory).catch(() => { });
+
       // Log to ledger
       await stockLedgerService.createEntry({
         inventoryId: inventory.id!,
@@ -588,6 +599,8 @@ class InventoryService {
       inventory.lastStockUpdate = new Date();
       await inventory.save();
 
+      this.syncToSearch(inventory).catch(() => { });
+
       await stockLedgerService.createEntry({
         inventoryId: inventory.id!,
         shopId: inventory.shopId,
@@ -627,6 +640,8 @@ class InventoryService {
       inventory.lastStockUpdate = new Date();
       await inventory.save();
 
+      this.syncToSearch(inventory).catch(() => { });
+
       await stockLedgerService.createEntry({
         inventoryId: inventory.id!,
         shopId: inventory.shopId,
@@ -657,6 +672,8 @@ class InventoryService {
     inventory.stock.totalBaseUnits += diffUnits;
     inventory.lastStockUpdate = new Date();
     await inventory.save();
+
+    this.syncToSearch(inventory).catch(() => { });
 
     await stockLedgerService.createEntry({
       inventoryId,
