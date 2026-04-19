@@ -56,8 +56,7 @@ export class InventorySearchService {
   static async indexInventory(inventory: any, product: any, shop: any) {
     try {
       const coords = shop.address?.location?.coordinates;
-      // Swapping coordinates as requested by user to fix reversal problem
-      const location = coords ? { lat: coords[0], lon: coords[1] } : undefined;
+      const location = coords ? { lat: coords[1], lon: coords[0] } : undefined;
 
       await esClient.index({
         index: PRODUCT_INDEX,
