@@ -48,6 +48,9 @@ async function syncInventory() {
 
 
                 if (product && shop) {
+                    if (shop.address?.location?.coordinates) {
+                        shop.address.location.coordinates.reverse();
+                    }
                     await InventorySearchService.indexInventory(inventory, product, shop);
                     successCount++;
                     console.log(`✅ Synced inventory: ${inventory.id} (Product: ${inventory.productId})`);

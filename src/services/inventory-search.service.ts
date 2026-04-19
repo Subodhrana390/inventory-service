@@ -128,6 +128,13 @@ export class InventorySearchService {
       if (params.location != null) ctx._source.location = params.location;
     `;
     const query = { term: { shopId } };
+    
+    // Ensure location is in { lat, lon } format if it exists
+    if (data.location && Array.isArray(data.location.coordinates)) {
+      const [lng, lat] = data.location.coordinates;
+      data.location = { lat, lon: lng };
+    }
+
     await this.updateByQuery(script, query, data);
   }
 
