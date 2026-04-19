@@ -5,11 +5,11 @@ const PRODUCT_INDEX = "shop_products";
 export class InventorySearchService {
   static async initIndex() {
     try {
-      const { body: exists } = await esClient.indices.exists({
+      const exists = await esClient.indices.exists({
         index: PRODUCT_INDEX,
       });
 
-      if (!exists) {
+      if (!exists.body) {
         await esClient.indices.create({
           index: PRODUCT_INDEX,
           body: {
@@ -56,8 +56,8 @@ export class InventorySearchService {
   static async indexInventory(inventory: any, product: any, shop: any) {
     try {
       const coords = shop.address?.location?.coordinates;
-      // Coordinates in MongoDB are [lon, lat]. ES GeoPoint expects {lat, lon}.
-      const location = coords ? { lat: coords[1], lon: coords[0] } : undefined;
+      // Swapping coordinates as requested by user to fix reversal problem
+      const location = coords ? { lat: coords[0], lon: coords[1] } : undefined;
 
       await esClient.index({
         index: PRODUCT_INDEX,
@@ -70,7 +70,7 @@ export class InventorySearchService {
           brand: product.brand,
           category: inventory.productCategory,
           description: product.description,
-          status: inventory.status || "active",
+          status: (inventory.status || "ACTIVE").toUpperCase(),
           location,
           pricing: {
             mrp: inventory.pricing?.mrp,
